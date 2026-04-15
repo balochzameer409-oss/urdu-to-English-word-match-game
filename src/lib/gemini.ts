@@ -1,11 +1,40 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WordPair } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+// Lazy initialization to prevent crash if API key is missing during build or initial load
+let aiInstance: GoogleGenAI | null = null;
+
+function getAI() {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+      console.warn("GEMINI_API_KEY is missing. Please set it in your environment variables.");
+      return null;
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+}
 
 export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]> {
   const historyString = history.map(p => `${p.english} (${p.urdu})`).join(", ");
   
+  const fallbackData: WordPair[] = [
+    { english: "Book", urdu: "کتاب" },
+    { english: "Pen", urdu: "قلم" },
+    { english: "Water", urdu: "پانی" },
+    { english: "Mosque", urdu: "مسجد" },
+    { english: "Prayer", urdu: "نماز" },
+    { english: "Sun", urdu: "سورج" },
+    { english: "Moon", urdu: "چاند" },
+    { english: "Star", urdu: "ستارہ" },
+    { english: "Flower", urdu: "پھول" },
+    { english: "Fruit", urdu: "پھل" },
+  ];
+
+  const ai = getAI();
+  if (!ai) return fallbackData;
+
   const prompt = `Generate 10 pairs of English and Urdu words for Islamic children to learn English. 
   The words should be simple, educational, and related to daily life or Islamic concepts (e.g., Mosque, Prayer, Book, Water, Fruit, etc.).
   
@@ -42,18 +71,6 @@ export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]
     return pairs;
   } catch (error) {
     console.error("Error generating word pairs:", error);
-    // Fallback data in case of API failure
-    return [
-      { english: "Book", urdu: "کتاب" },
-      { english: "Pen", urdu: "قلم" },
-      { english: "Water", urdu: "پانی" },
-      { english: "Mosque", urdu: "مسجد" },
-      { english: "Prayer", urdu: "نماز" },
-      { english: "Sun", urdu: "سورج" },
-      { english: "Moon", urdu: "چاند" },
-      { english: "Star", urdu: "ستارہ" },
-      { english: "Flower", urdu: "پھول" },
-      { english: "Fruit", urdu: "پھل" },
-    ];
+    return fallbackData;
   }
 }
