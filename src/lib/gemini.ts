@@ -35,10 +35,11 @@ export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]
   const ai = getAI();
   if (!ai) return fallbackData;
 
-  const prompt = `Generate 10 pairs of English and Urdu words for Islamic children to learn English. 
-  The words should be simple, educational, and related to daily life or Islamic concepts (e.g., Mosque, Prayer, Book, Water, Fruit, etc.).
+  const prompt = `Generate 10 UNIQUE and NEW pairs of English and Urdu words for Islamic children to learn English. 
+  Focus on a diverse mix of categories: Islamic terms (e.g., Mosque, Hajj), nature (e.g., Tree, Rain), household items, animals, and simple actions.
+  The words must be simple, educational, and suitable for kids.
   
-  CRITICAL: Do NOT include any of these previously used words: [${historyString}].
+  CRITICAL: You MUST NOT use any of the following words that were already used in previous rounds: [${historyString}].
   
   Return exactly 10 pairs in JSON format.
   Each pair must have "english" and "urdu" keys.
