@@ -6,16 +6,15 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
-    // These process.env values are injected by vite.config.ts during the build/dev process
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     
-    if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey === "MY_API_KEY") {
+    if (!apiKey || apiKey.length < 10) {
       console.warn("AI Warning: No valid API Key found. Using fallback local words.");
       return null;
     }
 
     // Mask for secure logging in console
-    const masked = apiKey.length > 8 ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : "***";
+    const masked = `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}`;
     console.log(`AI Status: API Key linked successfully (${masked})! Initializing Gemini AI...`);
     
     aiInstance = new GoogleGenAI({ apiKey });
