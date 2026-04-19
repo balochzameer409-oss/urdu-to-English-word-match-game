@@ -58,11 +58,12 @@ export default function App() {
     startNewGame(false);
   }, []);
 
-  const startNewGame = useCallback(async (isNextRound: boolean = false) => {
+  const startNewGame = useCallback(async (isNextRound: any = false) => {
+    const shouldIncrement = isNextRound === true;
     setState(prev => {
-      const nextRound = isNextRound ? prev.currentRound + 1 : prev.currentRound;
+      const nextRound = shouldIncrement ? prev.currentRound + 1 : prev.currentRound;
       // Persist next round if it changed
-      if (isNextRound) {
+      if (shouldIncrement) {
         localStorage.setItem(ROUND_KEY, nextRound.toString());
       }
       
@@ -453,7 +454,7 @@ export default function App() {
           <Button 
             variant="outline" 
             size="sm" 
-            onClick={startNewGame}
+            onClick={() => startNewGame(false)}
             disabled={state.isLoading}
             className="border-islamic-gold text-islamic-green hover:bg-islamic-gold/10"
           >
