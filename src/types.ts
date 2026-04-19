@@ -17,4 +17,9 @@ export interface GameState {
   history: WordPair[];
   isLoading: boolean;
   isWon: boolean;
+  isLost: boolean;
+  hintPairId: string | null;
+  shakingCardIds: string[];
+  mistakes: number;
+  helpsUsed: number;
 }

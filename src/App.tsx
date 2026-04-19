@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { BookOpen, RefreshCw, Trophy, Star, Moon, Sun } from 'lucide-react';
+import { BookOpen, RefreshCw, Trophy, Star, Moon, Sun, HelpCircle, Heart, XCircle } from 'lucide-react';
 import { generateWordPairs } from './lib/gemini';
 import { WordPair, GameCard, GameState } from './types';
 import { sounds } from './lib/sounds';
@@ -26,9 +26,16 @@ export default function App() {
     history: [],
     isLoading: true,
     isWon: false,
+    isLost: false,
+    hintPairId: null,
+    shakingCardIds: [],
+    mistakes: 0,
+    helpsUsed: 0,
   });
 
   const [score, setScore] = useState(0);
+  const urduVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const englishVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
   // Load history from local storage
   useEffect(() => {
@@ -40,7 +47,18 @@ export default function App() {
   }, []);
 
   const startNewGame = useCallback(async () => {
-    setState(prev => ({ ...prev, isLoading: true, isWon: false, matchedPairIds: [], selectedCard: null }));
+    setState(prev => ({ 
+      ...prev, 
+      isLoading: true, 
+      isWon: false, 
+      isLost: false,
+      matchedPairIds: [], 
+      selectedCard: null, 
+      hintPairId: null, 
+      shakingCardIds: [],
+      mistakes: 0,
+      helpsUsed: 0
+    }));
     
     // Get current history to avoid repeats
     const currentHistory = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -81,7 +99,11 @@ export default function App() {
   }, []);
 
   const handleCardClick = (card: GameCard) => {
-    if (state.matchedPairIds.includes(card.pairId)) return;
+    if (state.matchedPairIds.includes(card.pairId) || state.hintPairId || state.shakingCardIds.includes(card.id) || state.isLost || state.isWon) return;
+    
+    // Speak the text
+    speakText(card.text, card.type === 'urdu' ? 'ur' : 'en');
+
     if (state.selectedCard?.id === card.id) {
       setState(prev => ({ ...prev, selectedCard: null }));
       return;
@@ -114,15 +136,159 @@ export default function App() {
           });
         }
       } else {
-        // No match - highlight the new card instead
+        // No match - Trigger vibration/shake
         sounds.playWrong();
-        setState(prev => ({ ...prev, selectedCard: card }));
+        const firstCardId = state.selectedCard.id;
+        const secondCardId = card.id;
+        
+        const newMistakes = state.mistakes + 1;
+        const shouldLose = newMistakes >= 3;
+
+        setState(prev => ({ 
+          ...prev, 
+          shakingCardIds: [firstCardId, secondCardId],
+          selectedCard: null,
+          mistakes: newMistakes,
+          isLost: shouldLose
+        }));
+
+        if (shouldLose) {
+          sounds.playWrong(); // Play it again or a specific lose sound if available
+        }
+
+        // Stop shaking after animation duration
+        setTimeout(() => {
+          setState(prev => ({ ...prev, shakingCardIds: [] }));
+        }, 500);
       }
     }
   };
 
+  const speakText = (text: string, lang: string) => {
+    if (!('speechSynthesis' in window)) return;
+    
+    // Stop current speech instantly
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9; // Slightly faster for snappier feel
+    
+    if (lang === 'ur' && urduVoiceRef.current) {
+      utterance.voice = urduVoiceRef.current;
+      utterance.lang = urduVoiceRef.current.lang;
+    } else if (lang === 'en' && englishVoiceRef.current) {
+      utterance.voice = englishVoiceRef.current;
+      utterance.lang = englishVoiceRef.current.lang;
+    } else {
+      // Fallback if refs not ready yet
+      utterance.lang = lang === 'ur' ? 'ur-PK' : 'en-US';
+    }
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Optimize voice loading and caching
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+
+    const findVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+
+      // Cache Urdu voice
+      if (!urduVoiceRef.current) {
+        urduVoiceRef.current = voices.find(v => v.lang.startsWith('ur')) || 
+                             voices.find(v => v.name.toLowerCase().includes('urdu')) ||
+                             voices.find(v => v.lang.startsWith('hi')) || null;
+      }
+
+      // Cache English voice
+      if (!englishVoiceRef.current) {
+        englishVoiceRef.current = voices.find(v => v.lang.startsWith('en')) || null;
+      }
+
+      // Snappy warm-up: Speak a silent character to keep engine ready
+      if (urduVoiceRef.current || englishVoiceRef.current) {
+        const warmUp = new SpeechSynthesisUtterance('');
+        warmUp.volume = 0;
+        window.speechSynthesis.speak(warmUp);
+      }
+    };
+
+    // Initial load
+    findVoices();
+    
+    // Some browsers need the event listener
+    window.speechSynthesis.onvoiceschanged = findVoices;
+    
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  const handleAutoMatch = () => {
+    if (state.hintPairId || state.isLost || state.isWon || state.helpsUsed >= 3) return;
+
+    // Logic: If a card is already selected, help with THAT pair.
+    // Otherwise, help with the first unmatched pair.
+    let pairId: string | undefined;
+    
+    if (state.selectedCard) {
+      pairId = state.selectedCard.pairId;
+    } else {
+      const unmatchedPair = state.cards.find(c => !state.matchedPairIds.includes(c.pairId));
+      pairId = unmatchedPair?.pairId;
+    }
+    
+    if (pairId) {
+      const pairCards = state.cards.filter(c => c.pairId === pairId);
+      
+      const newHelpsUsed = state.helpsUsed + 1;
+      const shouldLose = newHelpsUsed >= 3;
+
+      // Highlight them first
+      setState(prev => ({ ...prev, hintPairId: pairId || null, helpsUsed: newHelpsUsed }));
+      
+      // Speak both words
+      const enWord = pairCards.find(c => c.type === 'english')?.text || '';
+      const urWord = pairCards.find(c => c.type === 'urdu')?.text || '';
+      
+      speakText(enWord, 'en');
+      setTimeout(() => speakText(urWord, 'ur'), 1000);
+
+      // Wait 2.5 seconds before matching and removing
+      setTimeout(() => {
+        sounds.playMatch();
+        const newMatchedIds = [...state.matchedPairIds, pairId!];
+        
+        // Final check: if user uses 3rd help, they lose UNLESS this was the final pair
+        const isActuallyLost = shouldLose && newMatchedIds.length < 10;
+
+        setState(prev => ({
+          ...prev,
+          matchedPairIds: newMatchedIds,
+          selectedCard: null,
+          hintPairId: null,
+          isLost: isActuallyLost
+        }));
+        setScore(prev => prev + 5);
+
+        if (newMatchedIds.length === 10 && !isActuallyLost) {
+          sounds.playWin();
+          setState(prev => ({ ...prev, isWon: true }));
+          confetti({
+            particleCount: 150,
+            spread: 70,
+            origin: { y: 0.6 },
+            colors: ['#D4AF37', '#006400', '#FDF5E6']
+          });
+        }
+      }, 2500);
+    }
+  };
+
   return (
-    <div className="min-h-screen relative overflow-hidden flex flex-col items-center p-4 md:p-8">
+    <div className="min-h-screen relative overflow-hidden flex flex-col items-center p-2 md:p-8">
       {/* Background Pattern */}
       <div className="absolute inset-0 islamic-pattern pointer-events-none" />
 
@@ -130,7 +296,7 @@ export default function App() {
       <motion.header 
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="relative z-10 text-center mb-8"
+        className="relative z-10 text-center mb-4"
       >
         <div className="flex items-center justify-center gap-2 mb-2">
           <Moon className="text-islamic-gold fill-islamic-gold w-6 h-6" />
@@ -142,10 +308,29 @@ export default function App() {
         <p className="text-islamic-dark opacity-80 font-medium">
           Learn English
         </p>
-        <div className="mt-4 flex items-center justify-center gap-4">
-          <div className="bg-white/50 backdrop-blur-sm px-4 py-1 rounded-full border border-islamic-gold/30 shadow-sm">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
+          <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm px-4 py-1 rounded-full border border-islamic-gold/30 shadow-sm">
             <span className="text-sm font-semibold text-islamic-green">Score: {score}</span>
           </div>
+
+          <div className="flex items-center gap-1 bg-red-50/50 backdrop-blur-sm px-3 py-1 rounded-full border border-red-200 shadow-sm">
+            {[...Array(3)].map((_, i) => (
+              <Heart 
+                key={i} 
+                className={`w-4 h-4 ${i < (3 - state.mistakes) ? 'text-red-500 fill-red-500' : 'text-red-200'}`} 
+              />
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 bg-yellow-50/50 backdrop-blur-sm px-3 py-1 rounded-full border border-yellow-200 shadow-sm">
+            {[...Array(3)].map((_, i) => (
+              <Star 
+                key={i} 
+                className={`w-4 h-4 ${i < (3 - state.helpsUsed) ? 'text-yellow-500 fill-yellow-500' : 'text-yellow-200'}`} 
+              />
+            ))}
+          </div>
+          
           <Button 
             variant="outline" 
             size="sm" 
@@ -155,6 +340,16 @@ export default function App() {
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${state.isLoading ? 'animate-spin' : ''}`} />
             New Game
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleAutoMatch}
+            disabled={state.isLoading || state.matchedPairIds.length === 10}
+            className="border-islamic-green/30 text-islamic-green hover:bg-islamic-green/5 italic"
+          >
+            <HelpCircle className="w-4 h-4 mr-2" />
+            I need help / مجھے نہیں پتہ
           </Button>
         </div>
       </motion.header>
@@ -167,11 +362,13 @@ export default function App() {
             <p className="text-islamic-green font-medium arabic-text">الفاظ تیار ہو رہے ہیں...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 md:gap-4">
+          <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 gap-2 md:gap-4">
             <AnimatePresence>
               {state.cards.map((card) => {
                 const isMatched = state.matchedPairIds.includes(card.pairId);
                 const isSelected = state.selectedCard?.id === card.id;
+                const isHint = state.hintPairId === card.pairId;
+                const isShaking = state.shakingCardIds.includes(card.id);
 
                 if (isMatched) return null;
 
@@ -180,23 +377,35 @@ export default function App() {
                     key={card.id}
                     layout
                     initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
+                    animate={{ 
+                      scale: isHint ? [1, 1.1, 1] : 1,
+                      opacity: 1,
+                      x: isShaking ? [0, -10, 10, -10, 10, -5, 5, 0] : 0,
+                    }}
+                    transition={{
+                      scale: isHint ? { repeat: Infinity, duration: 1 } : { duration: 0.2 },
+                      x: isShaking ? { duration: 0.4 } : { duration: 0.2 }
+                    }}
                     exit={{ scale: 0.5, opacity: 0 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={!isShaking ? { scale: 1.05 } : {}}
+                    whileTap={!isShaking ? { scale: 0.95 } : {}}
                   >
                     <Card
                       onClick={() => handleCardClick(card)}
                       className={`
-                        h-24 md:h-32 flex items-center justify-center p-2 cursor-pointer transition-all duration-300
+                        h-14 md:h-20 flex items-center justify-center p-1 md:p-2 cursor-pointer transition-all duration-300
                         border-2 text-center select-none
-                        ${isSelected 
-                          ? 'border-islamic-gold bg-islamic-gold/20 shadow-lg shadow-islamic-gold/20' 
-                          : 'border-islamic-green/20 bg-white hover:border-islamic-gold/50 shadow-sm'}
+                        ${isShaking
+                          ? 'border-red-500 bg-red-50 shadow-md shadow-red-200'
+                          : isHint 
+                            ? 'border-islamic-gold bg-islamic-gold/40 shadow-xl shadow-islamic-gold/40 animate-pulse' 
+                            : isSelected 
+                              ? 'border-islamic-gold bg-islamic-gold/20 shadow-lg shadow-islamic-gold/20' 
+                              : 'border-islamic-green/20 bg-white hover:border-islamic-gold/50 shadow-sm'}
                       `}
                     >
                       <span className={`
-                        text-lg md:text-xl font-bold
+                        text-sm md:text-base font-bold
                         ${card.type === 'urdu' ? 'arabic-text text-islamic-green' : 'text-islamic-dark'}
                       `}>
                         {card.text}
@@ -238,6 +447,39 @@ export default function App() {
               className="bg-islamic-green hover:bg-islamic-green/90 text-white px-8 py-6 text-lg rounded-full"
             >
               Play Again
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Loser Modal */}
+      <Dialog open={state.isLost} onOpenChange={(open) => !open && startNewGame()}>
+        <DialogContent className="sm:max-w-md bg-red-50 border-red-200">
+          <DialogHeader className="text-center">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+              <XCircle className="w-10 h-10 text-red-500" />
+            </div>
+            <DialogTitle className="text-2xl font-bold text-red-700 arabic-text">
+              افسوس! آپ ہار گئے
+            </DialogTitle>
+            <DialogDescription className="text-red-900/70 text-lg">
+              Oh no! You've used up your lives or help.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-4">
+            <div className="text-4xl font-bold text-red-600">
+              Try Again!
+            </div>
+            <p className="text-sm text-center text-red-800/60">
+              Don't give up! Every mistake makes you better.
+            </p>
+          </div>
+          <DialogFooter className="sm:justify-center">
+            <Button 
+              onClick={startNewGame}
+              className="bg-red-600 hover:bg-red-700 text-white px-8 py-6 text-lg rounded-full shadow-lg shadow-red-200"
+            >
+              Restart Game
             </Button>
           </DialogFooter>
         </DialogContent>
