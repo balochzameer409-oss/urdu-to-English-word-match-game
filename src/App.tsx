@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { BookOpen, RefreshCw, Trophy, Star, Moon, Sun, HelpCircle, Heart, XCircle } from 'lucide-react';
+import { BookOpen, RefreshCw, Trophy, Star, Moon, Sun, HelpCircle, Heart, XCircle, Coins, Timer } from 'lucide-react';
 import { generateWordPairs } from './lib/gemini';
 import { WordPair, GameCard, GameState } from './types';
 import { sounds } from './lib/sounds';
@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/dialog';
 
 const STORAGE_KEY = 'islamic_puzzle_history';
+const COINS_KEY = 'islamic_puzzle_coins';
+const ROUND_KEY = 'islamic_puzzle_round';
 
 export default function App() {
   const [state, setState] = useState<GameState>({
@@ -31,34 +33,54 @@ export default function App() {
     shakingCardIds: [],
     mistakes: 0,
     helpsUsed: 0,
+    totalCoins: 0,
+    timeLeft: 120,
+    currentRound: 1,
   });
 
   const [score, setScore] = useState(0);
-  const urduVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  const englishVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const masterVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  // Load history from local storage
+  // Load history, coins, and round from local storage
   useEffect(() => {
     const savedHistory = localStorage.getItem(STORAGE_KEY);
-    if (savedHistory) {
-      setState(prev => ({ ...prev, history: JSON.parse(savedHistory) }));
-    }
-    startNewGame();
-  }, []);
-
-  const startNewGame = useCallback(async () => {
+    const savedCoins = localStorage.getItem(COINS_KEY);
+    const savedRound = localStorage.getItem(ROUND_KEY);
+    
     setState(prev => ({ 
       ...prev, 
-      isLoading: true, 
-      isWon: false, 
-      isLost: false,
-      matchedPairIds: [], 
-      selectedCard: null, 
-      hintPairId: null, 
-      shakingCardIds: [],
-      mistakes: 0,
-      helpsUsed: 0
+      history: savedHistory ? JSON.parse(savedHistory) : [],
+      totalCoins: savedCoins ? parseInt(savedCoins, 10) : 0,
+      currentRound: savedRound ? parseInt(savedRound, 10) : 1
     }));
+    
+    // Pass false to not increment round on first load
+    startNewGame(false);
+  }, []);
+
+  const startNewGame = useCallback(async (isNextRound: boolean = false) => {
+    setState(prev => {
+      const nextRound = isNextRound ? prev.currentRound + 1 : prev.currentRound;
+      // Persist next round if it changed
+      if (isNextRound) {
+        localStorage.setItem(ROUND_KEY, nextRound.toString());
+      }
+      
+      return { 
+        ...prev, 
+        isLoading: true, 
+        isWon: false, 
+        isLost: false,
+        matchedPairIds: [], 
+        selectedCard: null, 
+        hintPairId: null, 
+        shakingCardIds: [],
+        mistakes: 0,
+        helpsUsed: 0,
+        timeLeft: 120,
+        currentRound: nextRound
+      };
+    });
     
     // Get current history to avoid repeats
     const currentHistory = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -98,6 +120,24 @@ export default function App() {
     setScore(0);
   }, []);
 
+  // Timer logic
+  useEffect(() => {
+    if (state.isLoading || state.isWon || state.isLost) return;
+
+    const timer = setInterval(() => {
+      setState(prev => {
+        if (prev.timeLeft <= 1) {
+          clearInterval(timer);
+          sounds.playGameOver();
+          return { ...prev, timeLeft: 0, isLost: true };
+        }
+        return { ...prev, timeLeft: prev.timeLeft - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [state.isLoading, state.isWon, state.isLost]);
+
   const handleCardClick = (card: GameCard) => {
     if (state.matchedPairIds.includes(card.pairId) || state.hintPairId || state.shakingCardIds.includes(card.id) || state.isLost || state.isWon) return;
     
@@ -127,7 +167,19 @@ export default function App() {
 
         if (newMatchedIds.length === 10) {
           sounds.playWin();
-          setState(prev => ({ ...prev, isWon: true }));
+          sounds.playCoin(); 
+          const baseScore = score + 10;
+          const timeBonus = state.timeLeft * 2;
+          const finalScore = baseScore + timeBonus;
+          const newTotalCoins = state.totalCoins + finalScore;
+          localStorage.setItem(COINS_KEY, newTotalCoins.toString());
+          
+          setState(prev => ({ 
+            ...prev, 
+            isWon: true,
+            totalCoins: newTotalCoins
+          }));
+          
           confetti({
             particleCount: 150,
             spread: 70,
@@ -153,7 +205,7 @@ export default function App() {
         }));
 
         if (shouldLose) {
-          sounds.playWrong(); // Play it again or a specific lose sound if available
+          sounds.playGameOver();
         }
 
         // Stop shaking after animation duration
@@ -171,55 +223,51 @@ export default function App() {
     window.speechSynthesis.cancel();
     
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9; // Slightly faster for snappier feel
+    utterance.rate = 0.9; 
     
-    if (lang === 'ur' && urduVoiceRef.current) {
-      utterance.voice = urduVoiceRef.current;
-      utterance.lang = urduVoiceRef.current.lang;
-    } else if (lang === 'en' && englishVoiceRef.current) {
-      utterance.voice = englishVoiceRef.current;
-      utterance.lang = englishVoiceRef.current.lang;
+    if (masterVoiceRef.current) {
+      utterance.voice = masterVoiceRef.current;
+      utterance.lang = masterVoiceRef.current.lang;
     } else {
-      // Fallback if refs not ready yet
+      // Fallback if master voice not found yet
       utterance.lang = lang === 'ur' ? 'ur-PK' : 'en-US';
     }
     
     window.speechSynthesis.speak(utterance);
   };
 
-  // Optimize voice loading and caching
+  // Optimize voice loading - Find the best "Multilingual" Master Voice
   useEffect(() => {
     if (!('speechSynthesis' in window)) return;
 
-    const findVoices = () => {
+    const findMasterVoice = () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) return;
 
-      // Cache Urdu voice
-      if (!urduVoiceRef.current) {
-        urduVoiceRef.current = voices.find(v => v.lang.startsWith('ur')) || 
-                             voices.find(v => v.name.toLowerCase().includes('urdu')) ||
-                             voices.find(v => v.lang.startsWith('hi')) || null;
+      // Logic: Prefer Google Urdu or Hindi voices as they are highly multilingual
+      const bestVoice = voices.find(v => v.lang === 'ur-PK') || 
+                        voices.find(v => v.lang === 'hi-IN') ||
+                        voices.find(v => v.name.includes('Google') && (v.lang.startsWith('ur') || v.lang.startsWith('hi'))) ||
+                        voices.find(v => v.lang.startsWith('ur')) ||
+                        voices.find(v => v.lang.startsWith('hi'));
+
+      if (bestVoice) {
+        masterVoiceRef.current = bestVoice;
+      } else {
+        // Absolute fallback to any English voice which usually handles common words
+        masterVoiceRef.current = voices.find(v => v.lang.startsWith('en')) || null;
       }
 
-      // Cache English voice
-      if (!englishVoiceRef.current) {
-        englishVoiceRef.current = voices.find(v => v.lang.startsWith('en')) || null;
-      }
-
-      // Snappy warm-up: Speak a silent character to keep engine ready
-      if (urduVoiceRef.current || englishVoiceRef.current) {
+      // Warm up the engine
+      if (masterVoiceRef.current) {
         const warmUp = new SpeechSynthesisUtterance('');
         warmUp.volume = 0;
         window.speechSynthesis.speak(warmUp);
       }
     };
 
-    // Initial load
-    findVoices();
-    
-    // Some browsers need the event listener
-    window.speechSynthesis.onvoiceschanged = findVoices;
+    findMasterVoice();
+    window.speechSynthesis.onvoiceschanged = findMasterVoice;
     
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
@@ -271,11 +319,29 @@ export default function App() {
           hintPairId: null,
           isLost: isActuallyLost
         }));
-        setScore(prev => prev + 5);
+        
+        if (isActuallyLost) {
+          sounds.playGameOver();
+        }
+
+        const gainedScore = 5;
+        setScore(prev => prev + gainedScore);
 
         if (newMatchedIds.length === 10 && !isActuallyLost) {
           sounds.playWin();
-          setState(prev => ({ ...prev, isWon: true }));
+          sounds.playCoin();
+          const baseScore = score + gainedScore;
+          const timeBonus = state.timeLeft * 2;
+          const finalTotalScore = baseScore + timeBonus;
+          const newTotalCoins = state.totalCoins + finalTotalScore;
+          localStorage.setItem(COINS_KEY, newTotalCoins.toString());
+
+          setState(prev => ({ 
+            ...prev, 
+            isWon: true,
+            totalCoins: newTotalCoins
+          }));
+
           confetti({
             particleCount: 150,
             spread: 70,
@@ -284,6 +350,43 @@ export default function App() {
           });
         }
       }, 2500);
+    }
+  };
+
+  const buyHealthOnly = () => {
+    if (state.totalCoins >= 15) {
+      const newTotalCoins = state.totalCoins - 15;
+      localStorage.setItem(COINS_KEY, newTotalCoins.toString());
+      setState(prev => {
+        // Only clear isLost if we have time left
+        const isStillLost = prev.timeLeft <= 0;
+        return {
+          ...prev,
+          totalCoins: newTotalCoins,
+          isLost: isStillLost,
+          mistakes: 0,
+          helpsUsed: 0,
+        };
+      });
+      sounds.playBuy(); 
+    }
+  };
+
+  const buyTimeOnly = () => {
+    if (state.totalCoins >= 15) {
+      const newTotalCoins = state.totalCoins - 15;
+      localStorage.setItem(COINS_KEY, newTotalCoins.toString());
+      setState(prev => {
+        // Only clear isLost if we have mistakes left
+        const isStillLost = prev.mistakes >= 3 || prev.helpsUsed >= 3;
+        return {
+          ...prev,
+          totalCoins: newTotalCoins,
+          isLost: isStillLost,
+          timeLeft: 60,
+        };
+      });
+      sounds.playBuy(); 
     }
   };
 
@@ -310,7 +413,23 @@ export default function App() {
         </p>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-4">
           <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm px-4 py-1 rounded-full border border-islamic-gold/30 shadow-sm">
+            <span className="text-sm font-semibold text-islamic-green">Round: {state.currentRound}</span>
+          </div>
+
+          <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm px-4 py-1 rounded-full border border-islamic-gold/30 shadow-sm">
             <span className="text-sm font-semibold text-islamic-green">Score: {score}</span>
+          </div>
+
+          <div className="flex items-center gap-2 bg-amber-500/10 backdrop-blur-sm px-4 py-1 rounded-full border border-amber-500/30 shadow-sm">
+            <Coins className="w-4 h-4 text-amber-600 fill-amber-600" />
+            <span className="text-sm font-bold text-amber-700">{state.totalCoins}</span>
+          </div>
+
+          <div className={`flex items-center gap-2 px-4 py-1 rounded-full border shadow-sm transition-all duration-300 ${state.timeLeft <= 20 ? 'bg-red-500/20 border-red-500/40 animate-pulse' : 'bg-blue-500/10 border-blue-500/30'}`}>
+            <Timer className={`w-4 h-4 ${state.timeLeft <= 20 ? 'text-red-600' : 'text-blue-600'}`} />
+            <span className={`text-sm font-bold ${state.timeLeft <= 20 ? 'text-red-700' : 'text-blue-700'}`}>
+              {Math.floor(state.timeLeft / 60)}:{(state.timeLeft % 60).toString().padStart(2, '0')}
+            </span>
           </div>
 
           <div className="flex items-center gap-1 bg-red-50/50 backdrop-blur-sm px-3 py-1 rounded-full border border-red-200 shadow-sm">
@@ -443,10 +562,10 @@ export default function App() {
           </div>
           <DialogFooter className="sm:justify-center">
             <Button 
-              onClick={startNewGame}
+              onClick={() => startNewGame(true)}
               className="bg-islamic-green hover:bg-islamic-green/90 text-white px-8 py-6 text-lg rounded-full"
             >
-              Play Again
+              Next Round / اگلا راؤنڈ
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -463,23 +582,51 @@ export default function App() {
               افسوس! آپ ہار گئے
             </DialogTitle>
             <DialogDescription className="text-red-900/70 text-lg">
-              Oh no! You've used up your lives or help.
+              Oh no! You've used up your lives, help or time.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
-            <div className="text-4xl font-bold text-red-600">
-              Try Again!
+            <div className="p-4 bg-white/80 rounded-xl border border-red-100 shadow-sm w-full text-center">
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <Coins className="w-5 h-5 text-amber-600 fill-amber-600" />
+                <span className="text-2xl font-bold text-amber-700">{state.totalCoins} Coins</span>
+              </div>
+              <p className="text-xs text-red-800/60 uppercase tracking-wider font-semibold">Your Bank</p>
             </div>
-            <p className="text-sm text-center text-red-800/60">
-              Don't give up! Every mistake makes you better.
-            </p>
+            
+            <div className="grid grid-cols-2 gap-3 w-full">
+              <Button 
+                onClick={buyHealthOnly}
+                disabled={state.totalCoins < 15}
+                className={`flex flex-col items-center gap-1 py-10 rounded-xl shadow-lg transition-all ${state.totalCoins >= 15 ? 'bg-red-500 hover:bg-red-600 shadow-red-100' : 'bg-gray-200 text-gray-500 shadow-none'}`}
+              >
+                <Heart className={`w-5 h-5 ${state.totalCoins >= 15 ? 'fill-white' : ''}`} />
+                <span className="font-bold text-xs">Buy Health</span>
+                <span className="text-[10px] opacity-80 italic">15 Coins</span>
+              </Button>
+
+              <Button 
+                onClick={buyTimeOnly}
+                disabled={state.totalCoins < 15}
+                className={`flex flex-col items-center gap-1 py-10 rounded-xl shadow-lg transition-all ${state.totalCoins >= 15 ? 'bg-blue-500 hover:bg-blue-600 shadow-blue-100' : 'bg-gray-200 text-gray-500 shadow-none'}`}
+              >
+                <Timer className="w-5 h-5" />
+                <span className="font-bold text-xs">Buy Time</span>
+                <span className="text-[10px] opacity-80 italic">15 Coins</span>
+              </Button>
+            </div>
+
+            {state.totalCoins < 15 && (
+              <p className="text-red-800/60 text-[10px] italic">Need at least 15 coins to continue</p>
+            )}
           </div>
-          <DialogFooter className="sm:justify-center">
+          <DialogFooter className="sm:justify-center flex flex-col gap-2">
             <Button 
-              onClick={startNewGame}
-              className="bg-red-600 hover:bg-red-700 text-white px-8 py-6 text-lg rounded-full shadow-lg shadow-red-200"
+              onClick={() => startNewGame(false)}
+              variant="outline"
+              className="w-full border-red-200 text-red-700 hover:bg-red-100 py-6 text-lg rounded-xl"
             >
-              Restart Game
+              Restart Round / دوبارہ آزمائیں
             </Button>
           </DialogFooter>
         </DialogContent>

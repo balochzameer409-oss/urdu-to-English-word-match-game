@@ -22,4 +22,7 @@ export interface GameState {
   shakingCardIds: string[];
   mistakes: number;
   helpsUsed: number;
+  totalCoins: number;
+  timeLeft: number;
+  currentRound: number;
 }

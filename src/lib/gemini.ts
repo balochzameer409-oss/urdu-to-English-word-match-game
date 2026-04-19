@@ -25,18 +25,47 @@ function getAI() {
 export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]> {
   const historyString = history.map(p => `${p.english} (${p.urdu})`).join(", ");
   
-  const fallbackData: WordPair[] = [
-    { english: "Book", urdu: "کتاب" },
-    { english: "Pen", urdu: "قلم" },
-    { english: "Water", urdu: "پانی" },
-    { english: "Mosque", urdu: "مسجد" },
-    { english: "Prayer", urdu: "نماز" },
-    { english: "Sun", urdu: "سورج" },
-    { english: "Moon", urdu: "چاند" },
-    { english: "Star", urdu: "ستارہ" },
-    { english: "Flower", urdu: "پھول" },
-    { english: "Fruit", urdu: "پھل" },
+  const fallbackPacks: WordPair[][] = [
+    [
+      { english: "Book", urdu: "کتاب" },
+      { english: "Pen", urdu: "قلم" },
+      { english: "Water", urdu: "پانی" },
+      { english: "Mosque", urdu: "مسجد" },
+      { english: "Prayer", urdu: "نماز" },
+      { english: "Sun", urdu: "سورج" },
+      { english: "Moon", urdu: "چاند" },
+      { english: "Star", urdu: "ستارہ" },
+      { english: "Flower", urdu: "پھول" },
+      { english: "Fruit", urdu: "پھل" },
+    ],
+    [
+      { english: "Apple", urdu: "سیب" },
+      { english: "Birds", urdu: "پرندے" },
+      { english: "Cloud", urdu: "بادل" },
+      { english: "Sky", urdu: "آسمان" },
+      { english: "School", urdu: "اسکول" },
+      { english: "Teacher", urdu: "استاد" },
+      { english: "Mother", urdu: "ماں" },
+      { english: "Father", urdu: "والد" },
+      { english: "Brother", urdu: "بھائی" },
+      { english: "Sister", urdu: "بہن" },
+    ],
+    [
+      { english: "Milk", urdu: "دودھ" },
+      { english: "Bread", urdu: "روٹی" },
+      { english: "Tree", urdu: "درخت" },
+      { english: "Leaf", urdu: "پتہ" },
+      { english: "River", urdu: "دریا" },
+      { english: "Fish", urdu: "مچھلی" },
+      { english: "Cat", urdu: "بلی" },
+      { english: "Chair", urdu: "کرسی" },
+      { english: "Table", urdu: "میز" },
+      { english: "Window", urdu: "کھڑکی" },
+    ]
   ];
+
+  // Pick a random pack
+  const fallbackData = fallbackPacks[Math.floor(Math.random() * fallbackPacks.length)];
 
   const ai = getAI();
   if (!ai) return fallbackData;
@@ -64,6 +93,7 @@ export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]
             properties: {
               english: { type: Type.STRING },
               urdu: { type: Type.STRING },
+              category: { type: Type.STRING },
             },
             required: ["english", "urdu"],
           },
@@ -76,8 +106,12 @@ export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]
     
     const pairs: WordPair[] = JSON.parse(text);
     return pairs;
-  } catch (error) {
-    console.error("Error generating word pairs:", error);
+  } catch (error: any) {
+    if (error?.status === 'RESOURCE_EXHAUSTED' || error?.message?.includes('429')) {
+      console.warn("AI Status: Quota reached (429). Using pre-defined expert word pack.");
+    } else {
+      console.error("AI Status: API Error.", error);
+    }
     return fallbackData;
   }
 }
