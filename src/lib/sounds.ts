@@ -31,8 +31,8 @@ class SoundManager {
   }
 
   playSelect() {
-    // Sharp click/pop sound
-    this.playTone(1200, 'sine', 0.1, 0.2);
+    // Sharp click/pop sound - increased volume and pitch for coin counting
+    this.playTone(1500, 'sine', 0.1, 0.4);
   }
 
   playMatch() {

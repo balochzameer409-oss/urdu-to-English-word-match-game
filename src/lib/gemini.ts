@@ -22,7 +22,7 @@ function getAI() {
   return aiInstance;
 }
 
-export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]> {
+export async function generateWordPairs(history: WordPair[], round: number): Promise<WordPair[]> {
   const historyString = history.map(p => `${p.english} (${p.urdu})`).join(", ");
   
   const fallbackPacks: WordPair[][] = [
@@ -39,46 +39,45 @@ export async function generateWordPairs(history: WordPair[]): Promise<WordPair[]
       { english: "Fruit", urdu: "پھل" },
     ],
     [
-      { english: "Apple", urdu: "سیب" },
-      { english: "Birds", urdu: "پرندے" },
-      { english: "Cloud", urdu: "بادل" },
-      { english: "Sky", urdu: "آسمان" },
-      { english: "School", urdu: "اسکول" },
-      { english: "Teacher", urdu: "استاد" },
-      { english: "Mother", urdu: "ماں" },
-      { english: "Father", urdu: "والد" },
-      { english: "Brother", urdu: "بھائی" },
-      { english: "Sister", urdu: "بہن" },
-    ],
-    [
-      { english: "Milk", urdu: "دودھ" },
-      { english: "Bread", urdu: "روٹی" },
-      { english: "Tree", urdu: "درخت" },
-      { english: "Leaf", urdu: "پتہ" },
-      { english: "River", urdu: "دریا" },
-      { english: "Fish", urdu: "مچھلی" },
-      { english: "Cat", urdu: "بلی" },
-      { english: "Chair", urdu: "کرسی" },
-      { english: "Table", urdu: "میز" },
-      { english: "Window", urdu: "کھڑکی" },
+      { english: "Good Morning", urdu: "صبح بخیر" },
+      { english: "How are you?", urdu: "آپ کیسے ہیں؟" },
+      { english: "Welcome", urdu: "خوش آمدید" },
+      { english: "Thank you", urdu: "شکریہ" },
+      { english: "Excuse me", urdu: "معذرت" },
+      { english: "Nice to meet you", urdu: "آپ سے مل کر خوشی ہوئی" },
+      { english: "Take care", urdu: "اپنا خیال رکھیں" },
+      { english: "God bless you", urdu: "اللہ آپ کو خوش رکھے" },
+      { english: "I am hungry", urdu: "مجھے بھوک لگی ہے" },
+      { english: "Where is the mosque?", urdu: "مسجد کہاں ہے؟" },
     ]
   ];
 
   // Pick a random pack
-  const fallbackData = fallbackPacks[Math.floor(Math.random() * fallbackPacks.length)];
+  const fallbackData = fallbackPacks[round > 3 ? 1 : 0];
 
   const ai = getAI();
   if (!ai) return fallbackData;
 
-  const prompt = `Generate 10 UNIQUE and NEW pairs of English and Urdu words for Islamic children to learn English. 
-  Focus on a diverse mix of categories: Islamic terms (e.g., Mosque, Hajj), nature (e.g., Tree, Rain), household items, animals, and simple actions.
-  The words must be simple, educational, and suitable for kids.
+  let difficultyPrompt = "";
+  if (round <= 3) {
+    difficultyPrompt = "Focus on SIMPLE SINGLE WORDS (nouns, animals, basic objects).";
+  } else if (round <= 6) {
+    difficultyPrompt = "Focus on COMMON SHORT PHRASES and GREETINGS (e.g., Hello, How are you, Thank you, Good night).";
+  } else {
+    difficultyPrompt = "Focus on FULL CONVERSATIONAL SENTENCES and DIALOGUE useful for daily life (e.g., 'I am going to the market', 'Peace be upon you', 'What is your name?').";
+  }
+
+  const prompt = `Generate exactly 10 UNIQUE and NEW pairs of English and Urdu content for a learning game. 
+  Current Round: ${round}.
+  Target Difficulty: ${difficultyPrompt}
   
-  CRITICAL: You MUST NOT use any of the following words that were already used in previous rounds: [${historyString}].
+  Theme: Focus on daily common conversational English (Hello, Hi, greetings, polite manners, basic needs).
+  
+  CRITICAL: You MUST NOT use any of the following items that were already used in previous rounds: [${historyString}].
   
   Return exactly 10 pairs in JSON format.
   Each pair must have "english" and "urdu" keys.
-  Example: [{"english": "Book", "urdu": "کتاب"}]`;
+  Example: [{"english": "Peace be upon you", "urdu": "السلام علیکم"}]`;
 
   try {
     const response = await ai.models.generateContent({

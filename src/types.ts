@@ -25,4 +25,14 @@ export interface GameState {
   totalCoins: number;
   timeLeft: number;
   currentRound: number;
+  pendingReward: number;
+  flyingCoins: { 
+    id: number; 
+    x: number; 
+    y: number; 
+    targetX?: number; 
+    targetY?: number; 
+    offsetX?: number; 
+    offsetY?: number; 
+  }[];
 }
