@@ -26,6 +26,8 @@ export interface GameState {
   timeLeft: number;
   currentRound: number;
   pendingReward: number;
+  unlockedThemeIds: string[];
+  currentThemeId: string;
   flyingCoins: { 
     id: number; 
     x: number; 
@@ -35,4 +37,19 @@ export interface GameState {
     offsetX?: number; 
     offsetY?: number; 
   }[];
+}
+
+export interface AppTheme {
+  id: string;
+  name: string;
+  nameUrdu: string;
+  price: number;
+  colors: {
+    primary: string;
+    secondary: string;
+    background: string;
+    card: string;
+    text: string;
+    accent: string;
+  };
 }

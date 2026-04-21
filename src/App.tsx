@@ -1,9 +1,11 @@
+import * as React from 'react';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence, useSpring, useTransform } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { BookOpen, RefreshCw, Trophy, Star, Moon, Sun, HelpCircle, Heart, XCircle, Coins, Timer, Clock, Wallet } from 'lucide-react';
+import { BookOpen, RefreshCw, Trophy, Star, Moon, Sun, HelpCircle, Heart, XCircle, Coins, Timer, Clock, Wallet, MoreVertical, Palette, Lock, CheckCircle2 } from 'lucide-react';
 import { generateWordPairs } from './lib/gemini';
-import { WordPair, GameCard, GameState } from './types';
+import { WordPair, GameCard, GameState, AppTheme } from './types';
+import { THEMES, STORAGE_KEYS } from './constants';
 import { sounds } from './lib/sounds';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -25,7 +27,7 @@ const SafeInt = (val: any, fallback = 0) => {
   return isNaN(parsed) ? fallback : parsed;
 };
 
-const SmoothNumber = ({ value, className }: { value: number, className?: string }) => {
+const SmoothNumber = ({ value, className, style }: { value: number, className?: string, style?: React.HTMLAttributes<HTMLSpanElement>['style'] }) => {
   const spring = useSpring(value, {
     stiffness: 300, 
     damping: 30,
@@ -38,7 +40,7 @@ const SmoothNumber = ({ value, className }: { value: number, className?: string 
 
   const displayValue = useTransform(spring, (latest) => Math.round(latest));
 
-  return <motion.span className={className}>{displayValue}</motion.span>;
+  return <motion.span className={className} style={style}>{displayValue}</motion.span>;
 };
 
 export default function App() {
@@ -58,33 +60,44 @@ export default function App() {
     timeLeft: 120,
     currentRound: 1,
     pendingReward: 0,
+    unlockedThemeIds: ['emerald'],
+    currentThemeId: 'emerald',
     flyingCoins: [],
   });
 
   const [score, setScore] = useState(0);
   const [isBuying, setIsBuying] = useState(false);
+  const [isThemeOpen, setIsThemeOpen] = useState(false);
   const [isBankHitting, setIsBankHitting] = useState(false);
   const coinTargetRef = useRef<HTMLDivElement>(null);
   const modalCoinTargetRef = useRef<HTMLDivElement>(null);
   const rewardSourceRef = useRef<HTMLDivElement>(null);
   const masterVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  // Load history, coins, and round from local storage
+  // Load history, coins, and themes from local storage
   useEffect(() => {
-    const savedHistory = localStorage.getItem(STORAGE_KEY);
-    const savedCoins = localStorage.getItem(COINS_KEY);
-    const savedRound = localStorage.getItem(ROUND_KEY);
+    const savedHistory = localStorage.getItem(STORAGE_KEYS.HISTORY);
+    const savedCoins = localStorage.getItem(STORAGE_KEYS.COINS);
+    const savedRound = localStorage.getItem(STORAGE_KEYS.ROUND);
+    const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME);
+    const savedUnlocked = localStorage.getItem(STORAGE_KEYS.UNLOCKED_THEMES);
     
     setState(prev => ({ 
       ...prev, 
       history: savedHistory ? JSON.parse(savedHistory) : [],
       totalCoins: SafeInt(savedCoins, 0),
-      currentRound: SafeInt(savedRound, 1)
+      currentRound: SafeInt(savedRound, 1),
+      currentThemeId: savedTheme || 'emerald',
+      unlockedThemeIds: savedUnlocked ? JSON.parse(savedUnlocked) : ['emerald']
     }));
     
     // Pass false to not increment round on first load
     startNewGame(false);
   }, []);
+
+  const currentTheme = useMemo(() => 
+    THEMES.find(t => t.id === state.currentThemeId) || THEMES[0]
+  , [state.currentThemeId]);
 
   const collectRewardAutomatically = useCallback((amount: number) => {
     if (amount <= 0) return;
@@ -148,6 +161,36 @@ export default function App() {
       });
     }, 50);
   }, []);
+
+  const handleThemeSelect = (theme: AppTheme) => {
+    const isUnlocked = state.unlockedThemeIds.includes(theme.id);
+    
+    if (isUnlocked) {
+      localStorage.setItem(STORAGE_KEYS.THEME, theme.id);
+      setState(prev => ({ ...prev, currentThemeId: theme.id }));
+      sounds.playSelect();
+    } else {
+      // Try to purchase
+      if (state.totalCoins >= theme.price) {
+        sounds.playBuy();
+        const newTotal = state.totalCoins - theme.price;
+        const newUnlocked = [...state.unlockedThemeIds, theme.id];
+        
+        localStorage.setItem(STORAGE_KEYS.COINS, newTotal.toString());
+        localStorage.setItem(STORAGE_KEYS.UNLOCKED_THEMES, JSON.stringify(newUnlocked));
+        localStorage.setItem(STORAGE_KEYS.THEME, theme.id);
+        
+        setState(prev => ({ 
+          ...prev, 
+          totalCoins: newTotal, 
+          unlockedThemeIds: newUnlocked,
+          currentThemeId: theme.id
+        }));
+      } else {
+        sounds.playWrong();
+      }
+    }
+  };
 
   const startNewGame = useCallback(async (isNextRound: any = false) => {
     const shouldIncrement = isNextRound === true;
@@ -307,7 +350,7 @@ export default function App() {
         // Stop shaking after animation duration
         setTimeout(() => {
           setState(prev => ({ ...prev, shakingCardIds: [] }));
-        }, 500);
+        }, 400);
       }
     }
   };
@@ -490,10 +533,31 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex flex-col items-center p-2 md:p-8">
+    <div 
+      className="min-h-screen relative overflow-hidden flex flex-col items-center p-2 md:p-8 transition-colors duration-700"
+      style={{ 
+        backgroundColor: currentTheme.colors.background,
+        backgroundImage: state.currentThemeId === 'onyx' 
+          ? `radial-gradient(circle at 50% 50%, #222222 0%, ${currentTheme.colors.background} 100%)` 
+          : 'none'
+      }}
+    >
       {/* Background Pattern and Liquid Effect */}
-      <div className="absolute inset-0 islamic-pattern pointer-events-none opacity-40" />
-      <div className="absolute inset-0 bg-gradient-to-br from-islamic-cream/50 via-white to-islamic-cream/50 animate-pulse pointer-events-none" />
+      <div 
+        className="absolute inset-0 geometric-pattern pointer-events-none opacity-5 transition-opacity duration-700" 
+        style={{ color: state.currentThemeId === 'onyx' ? '#D4AF37' : currentTheme.colors.primary }} 
+      />
+      {state.currentThemeId === 'onyx' && (
+        <>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(212,175,55,0.2)_0%,transparent_50%)] pointer-events-none" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(212,175,55,0.1)_0%,transparent_50%)] pointer-events-none" />
+          <div className="absolute inset-0 shadow-[inset_0_0_150px_rgba(0,0,0,0.8)] pointer-events-none" />
+        </>
+      )}
+      <div 
+        className="absolute inset-0 animate-pulse pointer-events-none opacity-30" 
+        style={{ background: `linear-gradient(to bottom right, ${currentTheme.colors.background}, ${currentTheme.colors.secondary}20, ${currentTheme.colors.background})` }}
+      />
 
       {/* Header */}
       <motion.header 
@@ -511,11 +575,11 @@ export default function App() {
               exit={{ opacity: 0, scale: 1.1 }}
               className="flex items-center justify-center gap-2 mb-2"
             >
-              <Moon className="text-islamic-gold fill-islamic-gold w-6 h-6" />
-              <h1 className="text-3xl md:text-4xl font-bold text-islamic-green">
+              <Moon className="w-6 h-6" style={{ color: currentTheme.colors.secondary, fill: currentTheme.colors.secondary }} />
+              <h1 className="text-3xl md:text-4xl font-bold" style={{ color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary }}>
                 Welcome to Words Game
               </h1>
-              <Star className="text-islamic-gold fill-islamic-gold w-6 h-6" />
+              <Star className="w-6 h-6" style={{ color: currentTheme.colors.secondary, fill: currentTheme.colors.secondary }} />
             </motion.div>
           ) : (
             <motion.div
@@ -524,41 +588,81 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               className="flex flex-wrap items-center justify-center gap-2 md:gap-4 mt-2"
             >
-              <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm px-3 py-1 rounded-full border border-islamic-gold/30 shadow-sm">
-                <span className="text-xs md:text-sm font-semibold text-islamic-green">Round: {state.currentRound}</span>
+              <div 
+                className="flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm backdrop-blur-sm"
+                style={{ 
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.5)',
+                  borderColor: `${currentTheme.colors.primary}30`
+                }}
+              >
+                <span className="text-xs md:text-sm font-semibold" style={{ color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary }}>Round: {state.currentRound}</span>
               </div>
 
-              <div className="flex items-center gap-2 bg-white/50 backdrop-blur-sm px-3 py-1 rounded-full border border-islamic-gold/30 shadow-sm">
-                <span className="text-xs md:text-sm font-semibold text-islamic-green">Score: </span>
-                <SmoothNumber value={score} className="text-xs md:text-sm font-bold text-islamic-green" />
+              <div 
+                className="flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm backdrop-blur-sm"
+                style={{ 
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.5)',
+                  borderColor: `${currentTheme.colors.primary}30`
+                }}
+              >
+                <span className="text-xs md:text-sm font-semibold" style={{ color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary }}>Score: </span>
+                <SmoothNumber value={score} className="text-xs md:text-sm font-bold" style={{ color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary }} />
               </div>
 
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm transition-all duration-150 ${isBankHitting ? 'bg-amber-400 border-amber-500 scale-110' : 'bg-amber-500/10 border-amber-500/30'}`} ref={coinTargetRef}>
-            <Wallet className={`w-4 h-4 text-amber-600 transition-transform ${isBankHitting ? '-rotate-12 scale-125' : 'scale-100'}`} />
-            <SmoothNumber value={state.totalCoins} className={`text-xs md:text-sm font-bold transition-colors ${isBankHitting ? 'text-amber-900' : 'text-amber-700'}`} />
-          </div>
+              <div 
+                className="flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm transition-all duration-150 backdrop-blur-sm" 
+                ref={coinTargetRef}
+                style={{ 
+                  backgroundColor: isBankHitting ? currentTheme.colors.secondary : (state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : `${currentTheme.colors.secondary}10`),
+                  borderColor: isBankHitting ? currentTheme.colors.primary : (state.currentThemeId === 'onyx' ? `${currentTheme.colors.secondary}40` : `${currentTheme.colors.secondary}30`)
+                }}
+              >
+                <Wallet className={`w-4 h-4 transition-transform ${isBankHitting ? '-rotate-12 scale-125' : 'scale-100'}`} style={{ color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary }} />
+                <SmoothNumber value={state.totalCoins} className={`text-xs md:text-sm font-bold transition-colors ${isBankHitting ? 'text-white' : ''}`} style={{ color: isBankHitting ? 'white' : (state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary) }} />
+              </div>
 
-              <div className={`flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm transition-all duration-300 ${state.timeLeft <= 20 ? 'bg-red-500/20 border-red-500/40 animate-pulse' : 'bg-blue-500/10 border-blue-500/30'}`}>
-                <Timer className={`w-4 h-4 ${state.timeLeft <= 20 ? 'text-red-600' : 'text-blue-600'}`} />
-                <span className={`text-xs md:text-sm font-bold ${state.timeLeft <= 20 ? 'text-red-700' : 'text-blue-700'}`}>
+              <div 
+                className={`flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm transition-all duration-300 backdrop-blur-sm ${state.timeLeft <= 20 ? 'animate-pulse' : ''}`}
+                style={{ 
+                  backgroundColor: state.timeLeft <= 20 ? 'rgba(239,68,68,0.2)' : (state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : 'rgba(59,130,246,0.1)'),
+                  borderColor: state.timeLeft <= 20 ? 'rgba(239,68,68,0.4)' : (state.currentThemeId === 'onyx' ? `${currentTheme.colors.secondary}40` : 'rgba(59,130,246,0.3)')
+                }}
+              >
+                <Timer className={`w-4 h-4 ${state.timeLeft <= 20 ? 'text-red-600' : ''}`} style={{ color: state.timeLeft <= 20 ? undefined : (state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : '#2563eb') }} />
+                <span 
+                  className="text-xs md:text-sm font-bold" 
+                  style={{ color: state.timeLeft <= 20 ? '#dc2626' : (state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : '#1d4ed8') }}
+                >
                   {Math.floor(state.timeLeft / 60)}:{(state.timeLeft % 60).toString().padStart(2, '0')}
                 </span>
               </div>
 
-              <div className="flex items-center gap-1 bg-red-50/50 backdrop-blur-sm px-2 py-1 rounded-full border border-red-200 shadow-sm">
+              <div 
+                className="flex items-center gap-1 backdrop-blur-sm px-2 py-1 rounded-full border shadow-sm"
+                style={{ 
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : 'rgba(254,242,242,0.5)', 
+                  borderColor: state.currentThemeId === 'onyx' ? 'rgba(239,68,68,0.3)' : 'rgba(254,202,202,1)' 
+                }}
+              >
                 {[...Array(3)].map((_, i) => (
                   <Heart 
                     key={i} 
-                    className={`w-3 h-3 md:w-4 h-4 ${i < (3 - state.mistakes) ? 'text-red-500 fill-red-500' : 'text-red-200'}`} 
+                    className={`w-3 h-3 md:w-4 h-4 ${i < (3 - state.mistakes) ? 'text-red-500 fill-red-500' : (state.currentThemeId === 'onyx' ? 'text-red-900/40' : 'text-red-200')}`} 
                   />
                 ))}
               </div>
 
-              <div className="flex items-center gap-1 bg-yellow-50/50 backdrop-blur-sm px-2 py-1 rounded-full border border-yellow-200 shadow-sm">
+              <div 
+                className="flex items-center gap-1 backdrop-blur-sm px-2 py-1 rounded-full border shadow-sm"
+                style={{ 
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : 'rgba(254,252,232,0.5)', 
+                  borderColor: state.currentThemeId === 'onyx' ? 'rgba(234,179,8,0.3)' : 'rgba(254,240,138,1)' 
+                }}
+              >
                 {[...Array(3)].map((_, i) => (
                   <Star 
                     key={i} 
-                    className={`w-3 h-3 md:w-4 h-4 ${i < (3 - state.helpsUsed) ? 'text-yellow-500 fill-yellow-500' : 'text-yellow-200'}`} 
+                    className={`w-3 h-3 md:w-4 h-4 ${i < (3 - state.helpsUsed) ? 'text-yellow-500 fill-yellow-500' : (state.currentThemeId === 'onyx' ? 'text-yellow-900/40' : 'text-yellow-200')}`} 
                   />
                 ))}
               </div>
@@ -568,7 +672,12 @@ export default function App() {
                 size="sm" 
                 onClick={() => startNewGame(false)}
                 disabled={state.isLoading}
-                className="h-8 border-islamic-gold text-islamic-green hover:bg-islamic-gold/10 text-xs"
+                className="h-8 text-xs hover:bg-opacity-10 backdrop-blur-sm"
+                style={{ 
+                  color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary, 
+                  borderColor: state.currentThemeId === 'onyx' ? `${currentTheme.colors.secondary}50` : `${currentTheme.colors.primary}50`,
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : `${currentTheme.colors.primary}05`
+                }}
               >
                 <RefreshCw className={`w-3 h-3 mr-1 ${state.isLoading ? 'animate-spin' : ''}`} />
                 New Game
@@ -578,10 +687,29 @@ export default function App() {
                 size="sm" 
                 onClick={handleAutoMatch}
                 disabled={state.isLoading || state.matchedPairIds.length === 10}
-                className="h-8 border-islamic-green/30 text-islamic-green hover:bg-islamic-green/5 italic text-xs"
+                className="h-8 italic text-xs hover:bg-opacity-10 backdrop-blur-sm"
+                style={{ 
+                  color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary, 
+                  borderColor: state.currentThemeId === 'onyx' ? `${currentTheme.colors.secondary}40` : `${currentTheme.colors.primary}40`,
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : `${currentTheme.colors.primary}05`
+                }}
               >
                 <HelpCircle className="w-3 h-3 mr-1" />
                 Help
+              </Button>
+
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={() => setIsThemeOpen(true)}
+                className="h-8 w-8 rounded-full hover:bg-opacity-10 backdrop-blur-sm"
+                style={{ 
+                  color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.secondary, 
+                  borderColor: state.currentThemeId === 'onyx' ? `${currentTheme.colors.secondary}80` : currentTheme.colors.secondary,
+                  backgroundColor: state.currentThemeId === 'onyx' ? 'rgba(255,255,255,0.05)' : 'transparent'
+                }}
+              >
+                <Palette className="w-4 h-4" />
               </Button>
             </motion.div>
           )}
@@ -615,12 +743,14 @@ export default function App() {
                       scale: isHint ? [1, 1.05, 1] : 1,
                       opacity: 1,
                       rotateY: 0,
-                      x: isShaking ? [0, -8, 8, -8, 8, 0] : 0,
+                      x: isShaking ? [0, -6, 6, -6, 6, -3, 3, 0] : 0,
+                      rotate: isShaking ? [0, -1, 1, -1, 1, 0] : 0,
                     }}
                     transition={{
                       scale: isHint ? { repeat: Infinity, duration: 1 } : { duration: 0.15, ease: 'easeOut' },
                       rotateY: { duration: 0.2, ease: 'easeOut' },
-                      x: isShaking ? { duration: 0.3, ease: 'easeInOut' } : { duration: 0.1 }
+                      x: isShaking ? { duration: 0.4, ease: 'linear' } : { duration: 0.1 },
+                      rotate: isShaking ? { duration: 0.4, ease: 'linear' } : { duration: 0.1 }
                     }}
                     exit={{ scale: 0, opacity: 0, rotate: 10, filter: 'blur(5px)' }}
                     whileHover={!isShaking ? { scale: 1.03, y: -2 } : {}}
@@ -628,23 +758,29 @@ export default function App() {
                   >
                     <Card
                       onClick={() => handleCardClick(card)}
+                      style={{ 
+                        borderColor: isShaking ? '#ef4444' : isHint ? currentTheme.colors.secondary : isSelected ? currentTheme.colors.secondary : `${currentTheme.colors.primary}40`,
+                        backgroundColor: isShaking ? '#fef2f2' : isHint ? `${currentTheme.colors.secondary}80` : isSelected ? (state.currentThemeId === 'onyx' ? '#2d2d2d' : `${currentTheme.colors.secondary}30`) : (state.currentThemeId === 'onyx' ? '#1e1e1e' : '#ffffff'),
+                        boxShadow: state.currentThemeId === 'onyx' 
+                          ? (isSelected ? `0 10px 20px -5px ${currentTheme.colors.secondary}40, inset 0 0 10px ${currentTheme.colors.secondary}20` : `0 4px 0 0 #000, 0 8px 15px -10px rgba(0,0,0,0.5)`)
+                          : (isSelected ? `0 0 15px ${currentTheme.colors.secondary}40` : `0 2px 4px rgba(0,0,0,0.05)`),
+                        transform: state.currentThemeId === 'onyx' && isSelected ? 'translateY(-2px)' : 'none'
+                      }}
                       className={`
                         h-20 md:h-24 flex items-center justify-center p-2 md:p-3 cursor-pointer transition-all duration-300
-                        border-2 text-center select-none overflow-hidden
-                        ${isShaking
-                          ? 'border-red-500 bg-red-50 shadow-md shadow-red-200'
-                          : isHint 
-                            ? 'border-islamic-gold bg-islamic-gold/40 shadow-xl shadow-islamic-gold/40 animate-pulse' 
-                            : isSelected 
-                              ? 'border-islamic-gold bg-islamic-gold/20 shadow-lg shadow-islamic-gold/20' 
-                              : 'border-islamic-green/20 bg-white hover:border-islamic-gold/50 shadow-sm'}
+                        border-[3px] text-center select-none overflow-hidden
+                        ${isHint ? 'shadow-xl animate-pulse' : ''}
+                        ${state.currentThemeId === 'onyx' ? 'premium-shine shadow-[0_10px_20px_rgba(0,0,0,0.4)]' : ''}
+                        rounded-xl
                       `}
                     >
-                      <span className={`
-                        ${card.text.length > 20 ? 'text-[10px] md:text-xs' : card.text.length > 10 ? 'text-xs md:text-sm' : 'text-sm md:text-base'}
-                        font-bold leading-tight break-words
-                        ${card.type === 'urdu' ? 'arabic-text text-islamic-green' : 'text-islamic-dark'}
-                      `}>
+                      <span 
+                        className={`
+                          ${card.text.length > 20 ? 'text-[10px] md:text-xs' : card.text.length > 10 ? 'text-xs md:text-sm' : 'text-sm md:text-base'}
+                          font-black leading-tight break-words drop-shadow-sm
+                        `}
+                        style={{ color: card.type === 'urdu' ? (state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary) : (state.currentThemeId === 'onyx' ? '#ffffff' : currentTheme.colors.text) }}
+                      >
                         {card.text}
                       </span>
                     </Card>
@@ -667,12 +803,16 @@ export default function App() {
               opacity: 1,
               scale: isBankHitting ? [1, 1.3, 1] : 1
             }}
-            className={`absolute top-4 right-4 flex items-center gap-2 px-4 py-2 rounded-full border shadow-lg z-50 transition-all duration-150 ${isBankHitting ? 'bg-amber-400 border-amber-600 scale-105' : 'bg-amber-500/10 border-amber-500/30'}`}
+            className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 rounded-full border shadow-lg z-50 transition-all duration-150"
+            style={{ 
+              backgroundColor: isBankHitting ? currentTheme.colors.secondary : `${currentTheme.colors.secondary}10`,
+              borderColor: isBankHitting ? currentTheme.colors.primary : `${currentTheme.colors.secondary}30`
+            }}
             ref={modalCoinTargetRef}
           >
-            <Wallet className={`w-5 h-5 text-amber-600 fill-amber-600 transition-transform duration-100 ${isBankHitting ? '-rotate-12 scale-125' : 'rotate-0 scale-100'}`} />
-            <SmoothNumber value={state.totalCoins} className={`text-sm font-black transition-colors ${isBankHitting ? 'text-amber-900' : 'text-amber-700'}`} />
-            <span className="text-[10px] text-amber-600 font-bold uppercase ml-1">Bank</span>
+            <Wallet className={`w-5 h-5 transition-transform duration-100 ${isBankHitting ? '-rotate-12 scale-125' : 'rotate-0 scale-100'}`} style={{ color: currentTheme.colors.primary }} />
+            <SmoothNumber value={state.totalCoins} className={`text-sm font-black transition-colors ${isBankHitting ? 'text-amber-900' : 'text-amber-700'}`} style={{ color: currentTheme.colors.text }} />
+            <span className="text-[10px] font-bold uppercase ml-1" style={{ color: currentTheme.colors.primary }}>Bank</span>
           </motion.div>
           <motion.div 
             initial={{ scale: 0.9, opacity: 0 }}
@@ -687,10 +827,10 @@ export default function App() {
                 className="absolute inset-0 bg-islamic-gold rounded-full"
               />
             </div>
-            <DialogTitle className="text-3xl font-extrabold text-islamic-green arabic-text mb-2">
+            <DialogTitle className="text-3xl font-extrabold arabic-text mb-2" style={{ color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary }}>
               ماشاءاللہ! آپ جیت گئے
             </DialogTitle>
-            <DialogDescription className="text-islamic-dark text-lg font-medium opacity-80">
+            <DialogDescription className="text-lg font-medium opacity-80" style={{ color: currentTheme.colors.text }}>
               Round {state.currentRound} Complete!
             </DialogDescription>
           </motion.div>
@@ -700,46 +840,49 @@ export default function App() {
               initial={{ x: -20, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="flex items-center justify-between p-3 bg-white/60 rounded-xl border border-islamic-gold/10"
+              className="flex items-center justify-between p-3 bg-white/60 rounded-xl border"
+              style={{ borderColor: `${currentTheme.colors.primary}20` }}
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Star className="w-4 h-4 text-blue-600 fill-blue-600" />
+                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: `${currentTheme.colors.accent}20` }}>
+                  <Star className="w-4 h-4" style={{ color: currentTheme.colors.primary, fill: currentTheme.colors.primary }} />
                 </div>
-                <span className="font-bold text-islamic-dark text-sm">Match Score</span>
+                <span className="font-bold text-sm" style={{ color: currentTheme.colors.text }}>Match Score</span>
               </div>
-              <span className="text-lg font-black text-blue-700">+{score}</span>
+              <span className="text-lg font-black" style={{ color: currentTheme.colors.primary }}>+{score}</span>
             </motion.div>
 
             <motion.div 
               initial={{ x: -20, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               transition={{ delay: 0.15 }}
-              className="flex items-center justify-between p-3 bg-white/60 rounded-xl border border-islamic-gold/10"
+              className="flex items-center justify-between p-3 bg-white/60 rounded-xl border"
+              style={{ borderColor: `${currentTheme.colors.primary}20` }}
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center">
-                  <Clock className="w-4 h-4 text-amber-600" />
+                <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: `${currentTheme.colors.secondary}20` }}>
+                  <Clock className="w-4 h-4" style={{ color: currentTheme.colors.secondary }} />
                 </div>
-                <span className="font-bold text-islamic-dark text-sm">Time Bonus</span>
+                <span className="font-bold text-sm" style={{ color: currentTheme.colors.text }}>Time Bonus</span>
               </div>
-              <span className="text-lg font-black text-amber-700">+{state.timeLeft * 2}</span>
+              <span className="text-lg font-black" style={{ color: currentTheme.colors.secondary }}>+{state.timeLeft * 2}</span>
             </motion.div>
 
             <motion.div 
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.25, type: 'spring', stiffness: 300 }}
-              className="flex items-center justify-between p-4 bg-islamic-gold/10 rounded-xl border-2 border-islamic-gold/30 shadow-inner"
+              className="flex items-center justify-between p-4 rounded-xl border-2 shadow-inner"
+              style={{ backgroundColor: `${currentTheme.colors.secondary}10`, borderColor: `${currentTheme.colors.secondary}30` }}
               ref={rewardSourceRef}
             >
               <div className="flex items-center gap-3">
-                <Coins className="w-6 h-6 text-amber-600 fill-amber-600 animate-bounce" />
-                <span className="text-lg font-black text-islamic-green">Total Reward</span>
+                <Coins className="w-6 h-6 animate-bounce" style={{ color: currentTheme.colors.secondary, fill: currentTheme.colors.secondary }} />
+                <span className="text-lg font-black" style={{ color: currentTheme.colors.primary }}>Total Reward</span>
               </div>
               <div className="flex flex-col items-end">
-                <span className="text-2xl font-black text-amber-700">+<SmoothNumber value={state.pendingReward} /></span>
-                <span className="text-[8px] text-amber-600 font-bold uppercase tracking-tighter">Gold Coins</span>
+                <span className="text-2xl font-black" style={{ color: currentTheme.colors.secondary }}>+<SmoothNumber value={state.pendingReward} /></span>
+                <span className="text-[8px] font-bold uppercase tracking-tighter" style={{ color: currentTheme.colors.secondary }}>Gold Coins</span>
               </div>
             </motion.div>
           </div>
@@ -747,7 +890,12 @@ export default function App() {
           <DialogFooter className="sm:justify-center">
             <Button 
               onClick={() => startNewGame(true)}
-              className="w-full bg-islamic-green hover:bg-islamic-green/90 text-white px-8 py-8 text-xl font-bold rounded-2xl shadow-xl shadow-islamic-green/20 group"
+              className="w-full text-white px-8 py-8 text-xl font-bold rounded-2xl shadow-xl group border-2"
+              style={{ 
+                backgroundColor: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary,
+                borderColor: state.currentThemeId === 'onyx' ? '#ffffff40' : 'transparent',
+                color: state.currentThemeId === 'onyx' ? '#000000' : '#ffffff'
+              }}
             >
               Next Round / اگلا راؤنڈ
               <RefreshCw className="w-5 h-5 ml-2 group-hover:rotate-180 transition-transform duration-500" />
@@ -756,14 +904,100 @@ export default function App() {
         </DialogContent>
       </Dialog>
 
-      {/* Loser Modal */}
+      {/* Theme Selector Modal */}
+      <Dialog open={isThemeOpen} onOpenChange={setIsThemeOpen}>
+          <DialogContent 
+            className="sm:max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+            style={{ backgroundColor: currentTheme.colors.background, borderColor: currentTheme.colors.secondary }}
+          >
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-2" style={{ color: currentTheme.colors.primary }}>
+              <Palette className="w-6 h-6" />
+              Store / دکان
+            </DialogTitle>
+            <DialogDescription style={{ color: currentTheme.colors.text }}>
+              Unlock beautiful themes for your game! / اپنی گیم کے لیے خوبصورت رنگوں کا انتخاب کریں۔
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4 py-4 overflow-y-auto pr-2 pb-6 flex-1 theme-store-scrollbar">
+            {THEMES.map((theme) => {
+              const isUnlocked = state.unlockedThemeIds.includes(theme.id);
+              const isSelected = state.currentThemeId === theme.id;
+              
+              return (
+                <motion.div
+                  key={theme.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleThemeSelect(theme)}
+                  className={`relative p-1 rounded-2xl border-2 transition-all cursor-pointer overflow-hidden group ${
+                    isSelected ? 'border-primary ring-2 ring-primary ring-offset-2' : isUnlocked ? 'border-transparent hover:border-gray-300' : 'border-gray-200 grayscale hover:grayscale-0'
+                  }`}
+                  style={{ borderColor: isSelected ? theme.colors.primary : 'transparent' }}
+                >
+                  <div 
+                    className="h-28 w-full rounded-xl flex flex-col items-center justify-center gap-1 shadow-inner relative"
+                    style={{ backgroundColor: theme.colors.background }}
+                  >
+                    {/* Small Color Boxes Preview */}
+                    <div className="flex gap-1 mb-2">
+                       <div className="w-4 h-4 rounded-full border border-white" style={{ backgroundColor: theme.colors.primary }} />
+                       <div className="w-4 h-4 rounded-full border border-white" style={{ backgroundColor: theme.colors.secondary }} />
+                    </div>
+
+                    <span className="font-bold text-sm" style={{ color: theme.colors.text }}>{theme.name}</span>
+                    <span className="text-xs arabic-text opacity-70" style={{ color: theme.colors.text }}>{theme.nameUrdu}</span>
+
+                    {/* Status Overlays */}
+                    {!isUnlocked && (
+                      <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px] flex flex-col items-center justify-center text-white border-4 border-white/10 group-hover:bg-black/50 transition-colors">
+                        <motion.div
+                          animate={{ scale: [1, 1.1, 1] }}
+                          transition={{ repeat: Infinity, duration: 2 }}
+                        >
+                          <Lock className="w-8 h-8 mb-2 drop-shadow-lg" />
+                        </motion.div>
+                        <span className="text-xs font-black tracking-widest uppercase">{theme.price} Coins</span>
+                        <span className="text-[10px] opacity-60 font-bold">2KG HEAVY LOCK</span>
+                      </div>
+                    )}
+
+                    {isSelected && (
+                      <div className="absolute top-2 right-2">
+                        <CheckCircle2 className="w-5 h-5 text-green-500 fill-white" />
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          <DialogFooter className="sm:justify-center">
+             <div className="flex items-center gap-2 bg-amber-500/10 px-4 py-2 rounded-full border border-amber-500/30">
+                <Coins className="w-4 h-4 text-amber-600 fill-amber-600" />
+                <span className="text-sm font-bold text-amber-700">Balance: {state.totalCoins}</span>
+             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={state.isLost} onOpenChange={(open) => !open && startNewGame()}>
-        <DialogContent className="sm:max-w-md bg-red-50 border-red-200 overflow-hidden">
+        <DialogContent 
+          className="sm:max-w-md overflow-hidden"
+          style={{ backgroundColor: currentTheme.colors.background, borderColor: currentTheme.colors.secondary }}
+        >
           {/* Bank Branch Display in Modal */}
-          <div className={`absolute top-4 right-4 flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm z-50 transition-all ${isBankHitting ? 'bg-amber-400/30 border-amber-400 scale-110' : 'bg-amber-500/10 border-amber-500/30 scale-100'}`}>
-            <Wallet className="w-4 h-4 text-amber-600 fill-amber-600" />
-            <SmoothNumber value={state.totalCoins} className="text-xs font-bold text-amber-700" />
-            <span className="text-[10px] text-amber-600 font-bold uppercase ml-1">Bank</span>
+          <div 
+            className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1 rounded-full border shadow-sm z-50 transition-all"
+            style={{ 
+              backgroundColor: isBankHitting ? currentTheme.colors.secondary : `${currentTheme.colors.secondary}10`,
+              borderColor: isBankHitting ? currentTheme.colors.primary : `${currentTheme.colors.secondary}30`
+            }}
+          >
+            <Wallet className="w-4 h-4" style={{ color: currentTheme.colors.primary }} />
+            <SmoothNumber value={state.totalCoins} className="text-xs font-bold" style={{ color: currentTheme.colors.text }} />
+            <span className="text-[10px] font-bold uppercase ml-1" style={{ color: currentTheme.colors.primary }}>Bank</span>
           </div>
 
           <motion.div
@@ -775,21 +1009,24 @@ export default function App() {
               <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
                 <XCircle className="w-10 h-10 text-red-500" />
               </div>
-              <DialogTitle className="text-2xl font-bold text-red-700 arabic-text">
+              <DialogTitle className="text-2xl font-bold arabic-text" style={{ color: currentTheme.colors.primary }}>
                 افسوس! آپ ہار گئے
               </DialogTitle>
-              <DialogDescription className="text-red-900/70 text-lg">
+              <DialogDescription className="text-lg opacity-70" style={{ color: currentTheme.colors.text }}>
                 Oh no! You've used up your lives, help or time.
               </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col items-center gap-3 py-4">
-              <div className="p-3 bg-white/80 rounded-xl border border-red-100 shadow-sm w-full text-center">
+              <div 
+                className="p-3 bg-white/80 rounded-xl border shadow-sm w-full text-center"
+                style={{ borderColor: `${currentTheme.colors.primary}20` }}
+              >
                 <div className="flex items-center justify-center gap-2 mb-1">
-                  <Coins className="w-5 h-5 text-amber-600 fill-amber-600" />
-                  <SmoothNumber value={state.totalCoins} className="text-xl font-bold text-amber-700" />
-                  <span className="text-xl font-bold text-amber-700"> Coins</span>
+                  <Coins className="w-5 h-5" style={{ color: currentTheme.colors.secondary, fill: currentTheme.colors.secondary }} />
+                  <SmoothNumber value={state.totalCoins} className="text-xl font-bold" style={{ color: currentTheme.colors.text }} />
+                  <span className="text-xl font-bold" style={{ color: currentTheme.colors.text }}> Coins</span>
                 </div>
-                <p className="text-[10px] text-red-800/60 uppercase tracking-wider font-semibold">Your Bank</p>
+                <p className="text-[10px] uppercase tracking-wider font-semibold opacity-60" style={{ color: currentTheme.colors.primary }}>Your Bank</p>
               </div>
               
               <div className={`grid ${ (state.timeLeft <= 0 && (state.mistakes >= 3 || state.helpsUsed >= 3)) ? 'grid-cols-2' : 'grid-cols-1'} gap-3 w-full`}>
@@ -797,9 +1034,13 @@ export default function App() {
                   <Button 
                     onClick={buyHealthOnly}
                     disabled={state.totalCoins < 30 || isBuying}
-                    className={`flex flex-col items-center gap-1 py-6 rounded-xl shadow-lg transition-all ${state.totalCoins >= 30 && !isBuying ? 'bg-red-500 hover:bg-red-600 shadow-red-100' : 'bg-gray-200 text-gray-500 shadow-none'}`}
+                    className={`flex flex-col items-center gap-1 py-6 rounded-xl shadow-lg transition-all ${state.totalCoins >= 30 && !isBuying ? '' : 'bg-gray-200 text-gray-500 shadow-none'}`}
+                    style={{ 
+                      backgroundColor: state.totalCoins >= 30 && !isBuying ? (state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary) : undefined,
+                      color: state.totalCoins >= 30 && !isBuying ? (state.currentThemeId === 'onyx' ? '#000000' : '#ffffff') : undefined
+                    }}
                   >
-                    <Heart className={`w-4 h-4 ${state.totalCoins >= 30 && !isBuying ? 'fill-white' : ''}`} />
+                    <Heart className={`w-4 h-4 ${state.totalCoins >= 30 && !isBuying ? (state.currentThemeId === 'onyx' ? 'fill-black' : 'fill-white') : ''}`} />
                     <span className="font-bold text-[10px] uppercase tracking-tight">Restore Health</span>
                     <span className="text-[8px] opacity-80 italic">30 Coins</span>
                   </Button>
@@ -809,7 +1050,11 @@ export default function App() {
                   <Button 
                     onClick={buyTimeOnly}
                     disabled={state.totalCoins < 30 || isBuying}
-                    className={`flex flex-col items-center gap-1 py-6 rounded-xl shadow-lg transition-all ${state.totalCoins >= 30 && !isBuying ? 'bg-blue-500 hover:bg-blue-600 shadow-blue-100' : 'bg-gray-200 text-gray-500 shadow-none'}`}
+                    className={`flex flex-col items-center gap-1 py-6 rounded-xl shadow-lg transition-all ${state.totalCoins >= 30 && !isBuying ? '' : 'bg-gray-200 text-gray-500 shadow-none'}`}
+                    style={{ 
+                      backgroundColor: state.totalCoins >= 30 && !isBuying ? (state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.secondary) : undefined,
+                      color: state.totalCoins >= 30 && !isBuying ? (state.currentThemeId === 'onyx' ? '#000000' : '#ffffff') : undefined
+                    }}
                   >
                     <Timer className="w-4 h-4" />
                     <span className="font-bold text-[10px] uppercase tracking-tight">Add Extra Time</span>
@@ -819,14 +1064,18 @@ export default function App() {
               </div>
 
               {state.totalCoins < 30 && (
-                <p className="text-red-800/60 text-[10px] italic">Need at least 30 coins to continue</p>
+                <p className="text-[10px] italic opacity-60" style={{ color: currentTheme.colors.primary }}>Need at least 30 coins to continue</p>
               )}
             </div>
             <DialogFooter className="sm:justify-center flex flex-col gap-2">
               <Button 
                 onClick={() => startNewGame(false)}
                 variant="outline"
-                className="w-full border-red-200 text-red-700 hover:bg-red-100 py-6 text-lg rounded-xl transition-all active:scale-95"
+                className="w-full py-6 text-lg rounded-xl transition-all active:scale-95 border-2"
+                style={{ 
+                  borderColor: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : `${currentTheme.colors.primary}40`, 
+                  color: state.currentThemeId === 'onyx' ? currentTheme.colors.secondary : currentTheme.colors.primary 
+                }}
               >
                 Restart Round / دوبارہ آزمائیں
               </Button>
